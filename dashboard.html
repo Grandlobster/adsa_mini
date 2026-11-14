@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Enterprise Worm Defense Dashboard</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #10151d; color: #e8eef5; }
+    header { padding: 18px 24px; border-bottom: 1px solid #293544; }
+    h1 { margin: 0 0 6px; font-size: 1.35rem; }
+    main { padding: 18px; max-width: 1200px; margin: auto; }
+    section { background: #171f2a; border: 1px solid #293544; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .two-column { display: grid; grid-template-columns: minmax(500px, 2fr) minmax(320px, 1fr); gap: 18px; }
+    canvas { width: 100%; height: 560px; display: block; background: radial-gradient(circle, #202c3b, #0d1219); border-radius: 6px; }
+    button { background: #26384c; border: 1px solid #46627e; border-radius: 5px; color: #fff; cursor: pointer; margin: 3px; padding: 8px 11px; }
+    button:hover { background: #35516c; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    input, select { background: #202b38; border: 1px solid #46627e; color: white; border-radius: 4px; padding: 7px; margin: 3px; }
+    label { display: inline-block; margin: 5px 8px 5px 0; }
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0 16px; }
+    .metric { background: #202b38; border-radius: 5px; padding: 10px; text-align: center; }
+    .metric strong { display: block; font-size: 1.25rem; }
+    table { border-collapse: collapse; width: 100%; font-size: .84rem; }
+    th, td { border-bottom: 1px solid #293544; padding: 8px 4px; text-align: right; }
+    th:first-child, td:first-child { text-align: left; }
+    .small { color: #aab8c7; font-size: .9rem; }
+    .hidden { display: none; }
+    .error { color: #ff8c8c; min-height: 22px; }
+    .edge-row { margin: 6px 0; }
+    .dot { display: inline-block; border-radius: 50%; height: 10px; margin: 0 4px 0 10px; width: 10px; }
+    .healthy { background: #fff; } .infected { background: #f04e4e; } .patched { background: #4cdb79; }
+    @media (max-width: 900px) { .two-column { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Enterprise Worm Defense Dashboard</h1>
+    <div id="headerText">Choose how to create the network</div>
+  </header>
+  <main>
+    <section id="modeScreen">
+      <h2>Start the project</h2>
+      <p class="small">Choose a random network or enter your own network values.</p>
+      <button id="randomButton">Random Network</button>
+      <button id="customButton">Custom Network</button>
+    </section>
+
+    <section id="configScreen" class="hidden">
+  <h2>Custom Network Configuration</h2>
+  <p class="small">Enter the number of nodes and the maximum number of edges.</p>
+  <label>Number of nodes
+    <input id="nodeCount" type="number" min="1" max="100" value="8">
+  </label>
+  <label>Number of edges
+    <input id="edgeCount" type="number" min="0" value="8">
+  </label>
+  <button id="makeNodesButton">Make Node Inputs</button>
+  <div id="nodeInputs"></div>
+  <h3>Edges</h3>
+  <label>Source
+    <select id="sourceNode"></select>
+  </label>
+  <label>Target
+    <select id="targetNode"></select>
+  </label>
+  <button id="edgeButton">Add Edge</button>
+  <div id="edgeError" class="error"></div>
+  <div id="edgeList"></div>
+  <button id="saveNetworkButton">Use This Network</button>
+  <button id="backToModeButton">Back</button>
+</section>
+
+<section id="dashboardScreen" class="hidden">
+  <div class="two-column">
+    <section>
+      <canvas id="network" width="900" height="560"></canvas>
+      <div class="small"><span class="dot healthy"></span>Healthy <span class="dot infected"></span>Infected <span class="dot patched"></span>Patched</div>
+    </section>
+    <section>
+      <div>
+        <button data-action="simulate">Run Simulation</button>
+        <button data-action="dc">Run Divide &amp; Conquer</button>
+        <button data-action="greedy">Run Greedy</button>
+        <button data-action="dp">Run Dynamic Programming</button>
+        <button data-action="reset">Reset</button>
+      </div>
+      <p class="small">Click an algorithm button to open its step-by-step explanation page.</p>
+      <div class="metrics">
+        <div class="metric"><strong id="step">0</strong>Time step</div>
+        <div class="metric"><strong id="infected">1</strong>Infected</div>
+        <div class="metric"><strong id="curve">2.0%</strong>Compromised</div>
+      </div>
+      <h2>Performance HUD</h2>
+      <table><thead><tr><th>Algorithm</th><th>Time</th><th>Memory</th><th>Budget</th><th>Risk</th></tr></thead><tbody id="results"></tbody></table>
+    </section>
+  </div>
+</section>
+
+<section id="algorithmScreen" class="hidden">
+  <h2 id="algorithmTitle">Algorithm Steps</h2>
+  <p id="algorithmStep">Press Next Step to begin.</p>
+  <p>Step <span id="algorithmNumber">0</span> of <span id="algorithmTotal">0</span></p>
+  <p>Remaining budget: <strong id="remainingBudget">120</strong></p>
+  <p>Selected nodes: <strong id="selectedNodes">None</strong></p>
+  <button id="nextStepButton">Next Step</button>
+  <button id="backDashboardButton">Back to Dashboard</button>
+</section>
+  </main>
+  <script>
+    var canvas = document.getElementById("network");
+    var ctx = canvas.getContext("2d");
+    var snapshot = { nodes: [], edges: [] };
+    var positions = [];
+    var customNodes = [];
+    var customEdges = [];
+    var editingEdge = -1;
+
+    function showScreen(name) {
+  document.getElementById("modeScreen").classList.add("hidden");
+  document.getElementById("configScreen").classList.add("hidden");
+  document.getElementById("dashboardScreen").classList.add("hidden");
+  document.getElementById("algorithmScreen").classList.add("hidden");
+  document.getElementById(name).classList.remove("hidden");
+}
+
+function makePositions(count) {
+  positions = [];
+  for (var i = 0; i < count; i++) {
+    var angle = i * 2.39996;
+    var radius = 150 + (i % 7) * 24;
+    positions.push({x: Math.cos(angle) * radius, y: Math.sin(angle) * radius, z: (i % 9 - 4) * 28});
+  }
+}
+
+function project(point, rotation) {
+  var x = point.x * Math.cos(rotation) - point.z * Math.sin(rotation);
+  var z = point.x * Math.sin(rotation) + point.z * Math.cos(rotation);
+  return {x: canvas.width / 2 + x, y: canvas.height / 2 + point.y - z * .15, scale: 1 + z / 900};
+}
+
+function draw(time) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  var rotation = time / 5000;
+  var projected = [];
+  for (var i = 0; i < positions.length; i++) {
+    projected.push(project(positions[i], rotation));
+  }
+  ctx.strokeStyle = "rgba(130, 160, 190, .28)";
+  for (var j = 0; j < snapshot.edges.length; j++) {
+    var edge = snapshot.edges[j];
+    var a = projected[edge[0]];
+    var b = projected[edge[1]];
+    if (!a || !b) continue;
+    ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
+  }
+  for (var k = 0; k < snapshot.nodes.length; k++) {
+    var node = snapshot.nodes[k];
+    var point = projected[node.id];
+    if (!point) continue;
+    var radius = Math.max(3, 5 * point.scale);
+    ctx.fillStyle = node.state === "patched" ? "#4cdb79" : node.state === "infected" ? "#f04e4e" : "#ffffff";
+    ctx.beginPath(); ctx.arc(point.x, point.y, radius, 0, Math.PI * 2); ctx.fill();
+  }
+  requestAnimationFrame(draw);
+}
+
+function update(data) {
+  snapshot = data;
+  makePositions(data.nodes.length);
+  document.getElementById("headerText").textContent = data.nodes.length + "-node " + data.mode + " network | budget B = 120";
+  document.getElementById("step").textContent = data.time;
+  document.getElementById("infected").textContent = data.infected;
+  document.getElementById("curve").textContent = data.curve[data.curve.length - 1].toFixed(1) + "%";
+  var resultBox = document.getElementById("results");
+  resultBox.innerHTML = "";
+  for (var i = 0; i < data.benchmarks.length; i++) {
+    var result = data.benchmarks[i];
+    var row = document.createElement("tr");
+    row.innerHTML = "<td>" + result.name + "</td><td>" + result.time.toFixed(3) + " ms</td><td>" +
+      result.memory.toFixed(2) + " KB</td><td>" + result.budget + "/120</td><td>" + result.risk + "</td>";
+    resultBox.appendChild(row);
+  }
+}
+
+function postJson(url, data) {
+  return fetch(url, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(data)});
+}
+
+function setupConfig() {
+  showScreen("configScreen");
+  buildNodeInputs();
+}
+
+function buildNodeInputs() {
+  var count = parseInt(document.getElementById("nodeCount").value, 10);
+  var box = document.getElementById("nodeInputs");
+  box.innerHTML = "<h3>Node values</h3>";
+  customNodes = [];
+  for (var i = 0; i < count; i++) {
+    customNodes.push({id: i, vulnerability: 5, cost: 10});
+    box.innerHTML += "<div>Node " + i + " - vulnerability <input id='v" + i + "' type='number' min='1' max='10' value='5'> " +
+      "cost <input id='c" + i + "' type='number' min='1' value='10'></div>";
+  }
+  customEdges = [];
+  editingEdge = -1;
+  refreshNodeLists();
+  renderEdges();
+}
+
+function refreshNodeLists() {
+  var source = document.getElementById("sourceNode");
+  var target = document.getElementById("targetNode");
+  source.innerHTML = "";
+  target.innerHTML = "";
+  for (var i = 0; i < customNodes.length; i++) {
+    source.innerHTML += "<option value='" + i + "'>" + i + "</option>";
+    target.innerHTML += "<option value='" + i + "'>" + i + "</option>";
+  }
+}
+
+function renderEdges() {
+  var list = document.getElementById("edgeList");
+  var maxEdges = parseInt(document.getElementById("edgeCount").value, 10);
+  list.innerHTML = "<p class='small'>Added edges: " + customEdges.length + " / " + maxEdges + "</p>";
+  for (var i = 0; i < customEdges.length; i++) {
+    var edge = customEdges[i];
+    list.innerHTML += "<div class='edge-row'>Edge " + i + ": " + edge[0] + " - " + edge[1] +
+      " <button onclick='editEdge(" + i + ")'>Edit</button><button onclick='deleteEdge(" + i + ")'>Delete</button></div>";
+  }
+  document.getElementById("edgeButton").disabled = customEdges.length >= maxEdges && editingEdge < 0;
+}
+
+window.editEdge = function(index) {
+  editingEdge = index;
+  document.getElementById("sourceNode").value = customEdges[index][0];
+  document.getElementById("targetNode").value = customEdges[index][1];
+  document.getElementById("edgeButton").textContent = "Update Edge";
+  renderEdges();
+};
+
+window.deleteEdge = function(index) {
+  customEdges.splice(index, 1);
+  editingEdge = -1;
+  document.getElementById("edgeButton").textContent = "Add Edge";
+  renderEdges();
+};
+
+function addEdge() {
+  var left = parseInt(document.getElementById("sourceNode").value, 10);
+  var right = parseInt(document.getElementById("targetNode").value, 10);
+  var error = document.getElementById("edgeError");
+  error.textContent = "";
+  if (left === right) {
+    error.textContent = "Source and target must be different.";
+    return;
+  }
+  if (editingEdge < 0) {
+    for (var i = 0; i < customEdges.length; i++) {
+      if ((customEdges[i][0] === left && customEdges[i][1] === right) ||
+          (customEdges[i][0] === right && customEdges[i][1] === left)) {
+        error.textContent = "This edge is already added.";
+        return;
+      }
+    }
+    customEdges.push([left, right]);
+  } else {
+    customEdges[editingEdge] = [left, right];
+    editingEdge = -1;
+    document.getElementById("edgeButton").textContent = "Add Edge";
+  }
+  renderEdges();
+}
+
+function saveNetwork() {
+  var nodes = [];
+  for (var i = 0; i < customNodes.length; i++) {
+    nodes.push({
+      vulnerability: parseInt(document.getElementById("v" + i).value, 10),
+      cost: parseInt(document.getElementById("c" + i).value, 10)
+    });
+  }
+  var data = {
+    node_count: nodes.length,
+    edge_count: parseInt(document.getElementById("edgeCount").value, 10),
+    nodes: nodes,
+    edges: customEdges
+  };
+  postJson("/api/configure", data).then(function(response) {
+    return response.json();
+  }).then(function(result) {
+    if (result.message) {
+      document.getElementById("edgeError").textContent = result.message;
+      return;
+    }
+    update(result);
+    showScreen("dashboardScreen");
+  }).catch(function() {
+    document.getElementById("edgeError").textContent = "Could not save this network.";
+  });
+}
+
+function action(name) {
+  if (name === "dc" || name === "greedy" || name === "dp") {
+    openAlgorithm(name);
+    return;
+  }
+  var url = name === "reset" ? "/api/reset" : name === "simulate" ? "/api/simulate" : "/api/patch/" + name;
+  fetch(url, {method: "POST"}).then(function(response) {
+    return response.json();
+  }).then(function(data) {
+    update(data);
+  });
+}
+
+function openAlgorithm(name) {
+  postJson("/api/algorithm/" + name + "/start", {}).then(function(response) {
+    return response.json();
+  }).then(function(data) {
+    showScreen("algorithmScreen");
+    showAlgorithmStep(data);
+  });
+}
+
+function nextStep() {
+  postJson("/api/algorithm/next", {}).then(function(response) {
+    return response.json();
+  }).then(function(data) {
+    showAlgorithmStep(data);
+    fetch("/api/state").then(function(response) { return response.json(); }).then(update);
+  });
+}
+
+function showAlgorithmStep(data) {
+  document.getElementById("algorithmTitle").textContent = data.title;
+  document.getElementById("algorithmStep").textContent = data.step.text;
+  document.getElementById("algorithmNumber").textContent = data.current;
+  document.getElementById("algorithmTotal").textContent = data.total;
+  document.getElementById("remainingBudget").textContent = data.step.remaining_budget;
+  document.getElementById("selectedNodes").textContent = data.step.selected.length === 0 ? "None" : data.step.selected.join(", ");
+  document.getElementById("nextStepButton").disabled = data.finished;
+  if (data.finished) {
+    document.getElementById("nextStepButton").textContent = "Finished";
+  } else {
+    document.getElementById("nextStepButton").textContent = "Next Step";
+  }
+}
+
+document.getElementById("randomButton").onclick = function() {
+  fetch("/api/reset", {method: "POST"}).then(function(response) {
+    return response.json();
+  }).then(function(data) {
+    update(data);
+    showScreen("dashboardScreen");
+  });
+};
+document.getElementById("customButton").onclick = setupConfig;
+document.getElementById("makeNodesButton").onclick = buildNodeInputs;
+document.getElementById("edgeButton").onclick = addEdge;
+document.getElementById("saveNetworkButton").onclick = saveNetwork;
+document.getElementById("backToModeButton").onclick = function() { showScreen("modeScreen"); };
+document.getElementById("nextStepButton").onclick = nextStep;
+document.getElementById("backDashboardButton").onclick = function() { showScreen("dashboardScreen"); };
+var buttons = document.querySelectorAll("[data-action]");
+for (var i = 0; i < buttons.length; i++) {
+  buttons[i].onclick = function() { action(this.getAttribute("data-action")); };
+}
+document.getElementById("randomButton").focus();
+requestAnimationFrame(draw);
+
+  </script>
+</body>
+</html>
