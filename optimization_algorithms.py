@@ -1,4 +1,4 @@
-"""Basic algorithms for choosing nodes to patch."""
+"""Updated for some bugs in divide and conq"""
 
 
 def risk_reduction(node):
